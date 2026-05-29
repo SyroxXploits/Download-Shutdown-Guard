@@ -36,6 +36,22 @@ jobs:
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
         run: npm run package:win -- --publish never
 
+      # electron-builder will not overwrite a release asset that already exists
+      # with the same name, so re-publishing the same version (e.g. a rebuilt
+      # v1.0.15) would silently keep the old binaries. Delete any existing assets
+      # for this tag first so the fresh build is what actually gets published.
+      - name: Remove stale release assets
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets \
+            -q '.assets[].name' 2>/dev/null | while read -r asset; do
+            [ -n "$asset" ] && gh release delete-asset "$GITHUB_REF_NAME" "$asset" \
+              --repo "$GITHUB_REPOSITORY" --yes
+          done || true
+
       - name: Package Windows release and publish
         if: ${{ startsWith(github.ref, 'refs/tags/v') }}
         env:
