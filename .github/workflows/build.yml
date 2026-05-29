@@ -1,0 +1,51 @@
+name: Build
+
+on:
+  push:
+    branches: [main, master]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check & build
+        run: npm run build
+
+      - name: Package Windows release
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: npm run package:win -- --publish never
+
+      - name: Package Windows release and publish
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run package:win -- --publish always
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: download-shutdown-guard-win
+          path: |
+            dist/*.exe
+          if-no-files-found: ignore

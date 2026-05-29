@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+out/
+
+# TypeScript incremental build info
+*.tsbuildinfo
+
+# Logs
+*.log
+logs/
+
+# Editor / OS
+.claude/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local

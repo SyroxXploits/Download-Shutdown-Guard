@@ -1,0 +1,276 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ──────────────────────────────────────────────────────────────────────────
+   THEME TOKENS
+   Colors are stored as space-separated RGB channels so Tailwind's
+   `rgb(var(--x) / <alpha-value>)` opacity modifiers work everywhere.
+   The active theme is selected via a `data-theme` attribute on <html>.
+   ────────────────────────────────────────────────────────────────────────── */
+
+:root,
+[data-theme='dark'] {
+  --surface: 32 32 32;
+  --surface-raised: 43 43 43;
+  --surface-overlay: 50 50 50;
+  --surface-flyout: 60 60 60;
+  --accent: 0 120 212;
+  --accent-light: 96 205 255;
+  --accent-dark: 0 90 158;
+  --text-primary: 235 235 235;
+  --text-secondary: 170 170 170;
+  --text-tertiary: 125 125 125;
+  --text-disabled: 95 95 95;
+  --stroke: 255 255 255;
+  --fill: 255 255 255;
+  --status-success: 108 203 95;
+  --status-warning: 252 225 0;
+  --status-error: 255 107 107;
+  --status-info: 96 205 255;
+}
+
+[data-theme='black'] {
+  --surface: 0 0 0;
+  --surface-raised: 18 18 18;
+  --surface-overlay: 26 26 26;
+  --surface-flyout: 38 38 38;
+  --accent: 0 120 212;
+  --accent-light: 96 205 255;
+  --accent-dark: 0 90 158;
+  --text-primary: 235 235 235;
+  --text-secondary: 168 168 168;
+  --text-tertiary: 120 120 120;
+  --text-disabled: 92 92 92;
+  --stroke: 255 255 255;
+  --fill: 255 255 255;
+  --status-success: 108 203 95;
+  --status-warning: 252 225 0;
+  --status-error: 255 107 107;
+  --status-info: 96 205 255;
+}
+
+[data-theme='light'] {
+  --surface: 243 243 243;
+  --surface-raised: 255 255 255;
+  --surface-overlay: 251 251 251;
+  --surface-flyout: 255 255 255;
+  --accent: 0 95 184;
+  --accent-light: 0 103 192;
+  --accent-dark: 0 78 152;
+  --text-primary: 26 26 26;
+  --text-secondary: 80 80 80;
+  --text-tertiary: 115 115 115;
+  --text-disabled: 165 165 165;
+  --stroke: 0 0 0;
+  --fill: 0 0 0;
+  --status-success: 56 161 47;
+  --status-warning: 184 134 0;
+  --status-error: 209 52 56;
+  --status-info: 0 120 212;
+}
+
+[data-theme='blue'] {
+  --surface: 13 25 54;
+  --surface-raised: 20 35 70;
+  --surface-overlay: 27 44 84;
+  --surface-flyout: 36 56 102;
+  --accent: 56 132 255;
+  --accent-light: 125 185 255;
+  --accent-dark: 28 92 200;
+  --text-primary: 233 238 248;
+  --text-secondary: 168 182 208;
+  --text-tertiary: 120 135 165;
+  --text-disabled: 90 102 130;
+  --stroke: 255 255 255;
+  --fill: 255 255 255;
+  --status-success: 108 203 95;
+  --status-warning: 252 225 0;
+  --status-error: 255 107 107;
+  --status-info: 125 185 255;
+}
+
+[data-theme='darkblue'] {
+  --surface: 8 13 30;
+  --surface-raised: 15 22 46;
+  --surface-overlay: 21 30 58;
+  --surface-flyout: 30 42 74;
+  --accent: 70 130 240;
+  --accent-light: 120 170 255;
+  --accent-dark: 36 80 180;
+  --text-primary: 226 232 244;
+  --text-secondary: 158 172 198;
+  --text-tertiary: 112 126 156;
+  --text-disabled: 84 96 124;
+  --stroke: 255 255 255;
+  --fill: 255 255 255;
+  --status-success: 108 203 95;
+  --status-warning: 252 225 0;
+  --status-error: 255 107 107;
+  --status-info: 120 170 255;
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  html, body, #root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    background-color: rgb(var(--surface));
+    color: rgb(var(--text-primary));
+    font-family: 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
+    overflow: hidden;
+    transition: background-color 0.3s ease, color 0.3s ease;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgb(var(--fill) / 0.2);
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--fill) / 0.35);
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-win bg-surface-raised border border-stroke shadow-card;
+  }
+
+  .card-overlay {
+    @apply rounded-win bg-surface-overlay border border-stroke shadow-card;
+  }
+
+  .btn {
+    @apply px-4 py-1.5 rounded-win text-sm font-medium transition-all duration-150
+           border border-stroke cursor-pointer select-none;
+  }
+
+  .btn-accent {
+    @apply btn bg-accent text-white border-accent hover:bg-accent-dark active:scale-[0.97];
+  }
+
+  .btn-secondary {
+    @apply btn bg-surface-flyout text-text-primary hover:bg-surface-overlay active:scale-[0.97];
+  }
+
+  .btn-danger {
+    @apply btn bg-status-error text-white border-transparent hover:opacity-90 active:scale-[0.97];
+  }
+
+  .btn-ghost {
+    @apply btn bg-transparent border-transparent text-text-secondary
+           hover:bg-fill/[0.06] active:bg-fill/[0.1];
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .badge-downloading { @apply badge bg-accent/20 text-accent-light; }
+  .badge-idle        { @apply badge bg-fill/[0.08] text-text-secondary; }
+  .badge-complete    { @apply badge bg-status-success/20 text-status-success; }
+  .badge-paused      { @apply badge bg-status-warning/20 text-status-warning; }
+  .badge-error       { @apply badge bg-status-error/20 text-status-error; }
+
+  .input {
+    @apply w-full bg-surface-flyout border border-stroke rounded-win px-3 py-1.5
+           text-sm text-text-primary placeholder-text-tertiary
+           focus:outline-none focus:border-accent transition-colors;
+  }
+
+  .input-group { @apply flex flex-col gap-1; }
+  .label       { @apply text-xs text-text-secondary font-medium; }
+
+  .toggle {
+    @apply relative inline-flex h-5 w-9 items-center rounded-full transition-colors cursor-pointer;
+  }
+
+  .toggle-thumb {
+    @apply absolute left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform duration-200;
+  }
+
+  .progress-bar {
+    @apply h-1.5 rounded-full bg-fill/[0.1] overflow-hidden;
+  }
+
+  .progress-fill {
+    @apply h-full rounded-full transition-all duration-500;
+  }
+}
+
+/* Drag region for frameless window */
+.title-bar {
+  -webkit-app-region: drag;
+}
+
+.title-bar button,
+.title-bar a,
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* ── Animations ─────────────────────────────────────────────────────────── */
+
+@keyframes countdownPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.countdown-pulse {
+  animation: countdownPulse 1s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    rgb(var(--fill) / 0.03) 25%,
+    rgb(var(--fill) / 0.08) 50%,
+    rgb(var(--fill) / 0.03) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* Indeterminate progress sweep (unknown total size) */
+@keyframes indeterminate {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+
+.indeterminate-fill {
+  width: 30%;
+  animation: indeterminate 1.4s ease-in-out infinite;
+}
+
+/* Staggered list entrance */
+@keyframes popIn {
+  0%   { opacity: 0; transform: translateY(6px) scale(0.99); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.pop-in {
+  animation: popIn 0.25s ease-out both;
+}
