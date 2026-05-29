@@ -24,12 +24,13 @@ const ACTIVE_GRACE_MS = 45_000
 
 // Steam EAppState bit flags (subset). The "fully installed" bit (4) stays set
 // during in-place updates of an already-installed game, so it must NOT be used
-// to decide whether a download is happening. The bits below are the ones that
-// actually mean "an update/download is running" or "paused mid-update".
+// to decide whether a download is happening.
 const STATE_UPDATE_PAUSED = 512
-const STATE_UPDATE_RUNNING_MASK =
-  256 | // UpdateRunning
-  1024 | // UpdateStarted
+
+// Bits that mean bytes are actually being moved/applied *right now*. When a
+// download is paused Steam clears these but leaves the generic "update active"
+// markers below set — so these are what distinguishes downloading from paused.
+const STATE_TRANSFER_MASK =
   65536 | // Reconfiguring
   131072 | // Validating
   262144 | // AddingFiles
@@ -38,6 +39,12 @@ const STATE_UPDATE_RUNNING_MASK =
   2097152 | // Staging
   4194304 | // Committing
   8388608 // UpdateStopping
+
+// Generic "an update is in progress" markers. Steam keeps these set even while
+// the download is paused, so on their own they do NOT imply active transfer.
+const STATE_UPDATE_ACTIVE_MASK =
+  256 | // UpdateRunning
+  1024 // UpdateStarted
 
 function parseAcf(content: string): AcfData {
   const result: Record<string, string> = {}
@@ -204,10 +211,13 @@ async function processManifest(libPath: string, manifest: string): Promise<Downl
   // downloading/<appid> folder is a fixed-size staging buffer, not a progress
   // gauge (verified empirically). So an active update is reported as an
   // indeterminate in-progress download rather than a fabricated number.
-  const isRunning = (stateFlags & STATE_UPDATE_RUNNING_MASK) !== 0
   const isPaused = (stateFlags & STATE_UPDATE_PAUSED) !== 0
+  const isTransferring = (stateFlags & STATE_TRANSFER_MASK) !== 0
+  const isUpdateFlagged = (stateFlags & STATE_UPDATE_ACTIVE_MASK) !== 0
 
-  if (stateFlags === 0 || (!isRunning && !isPaused)) {
+  // Surface the task if it's transferring, paused, or otherwise flagged as an
+  // in-progress update. A game that's merely fully installed has none of these.
+  if (stateFlags === 0 || (!isPaused && !isTransferring && !isUpdateFlagged)) {
     return null
   }
 
@@ -222,12 +232,13 @@ async function processManifest(libPath: string, manifest: string): Promise<Downl
   const latestMtimeMs = Math.max(downloadActivity.latestMtimeMs, installActivity.latestMtimeMs)
   const recentlyActive = latestMtimeMs > 0 && Date.now() - latestMtimeMs <= ACTIVE_GRACE_MS
 
-  // Steam's flags are authoritative for running/paused. Recent disk writes are a
-  // secondary confirmation that keeps a briefly-quiet "running" download from
-  // being mislabelled. If Steam says it's running, trust it (it may be verifying
-  // or between chunks); only fall back to "paused" when the paused bit is set
-  // and nothing has been written recently.
-  const state: DownloadState = isRunning || recentlyActive ? 'downloading' : 'paused'
+  // The paused bit always wins — Steam leaves the generic "update started" marker
+  // set while paused, which is why a paused download used to read as
+  // "downloading". Otherwise it's only really downloading if a transfer bit is
+  // set or bytes have hit disk within the grace window; a lingering update flag
+  // with no disk writes for >45s is treated as paused/stalled.
+  const reallyDownloading = !isPaused && (isTransferring || recentlyActive)
+  const state: DownloadState = reallyDownloading ? 'downloading' : 'paused'
 
   return {
     id: `steam_${appId}`,
