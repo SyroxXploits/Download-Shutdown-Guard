@@ -150,12 +150,12 @@ popd
 
 echo.
 echo Waiting for GitHub Actions tag build to finish before uploading assets...
-timeout /t 20 /nobreak >nul
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Sleep -Seconds 20"
 :wait_tag_actions
 "%GH%" run list --repo "%REPO%" --branch "%TAG%" --limit 10 --json status -q ".[] | select(.status != \"completed\") | .status" > "%PUBLISH_TMP%\active-runs.txt"
 if errorlevel 1 exit /b 1
 for %%A in ("%PUBLISH_TMP%\active-runs.txt") do if %%~zA GTR 0 (
-  timeout /t 10 /nobreak >nul
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Sleep -Seconds 10"
   goto wait_tag_actions
 )
 
