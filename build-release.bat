@@ -150,21 +150,14 @@ popd
 
 echo.
 echo Waiting for GitHub Actions tag build to finish before uploading assets...
-set "GH_EXE=%GH%"
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$ErrorActionPreference='Stop';" ^
-  "$gh=$env:GH_EXE; $repo=$env:REPO; $tag=$env:TAG;" ^
-  "$deadline=(Get-Date).AddMinutes(20); $seen=$false;" ^
-  "do {" ^
-  "  $runs=@(& $gh run list --repo $repo --branch $tag --limit 10 --json databaseId,status,conclusion | ConvertFrom-Json);" ^
-  "  if ($runs.Count -gt 0) { $seen=$true }" ^
-  "  $active=@($runs | Where-Object { $_.status -ne 'completed' });" ^
-  "  if ($seen -and $active.Count -eq 0) { exit 0 }" ^
-  "  Start-Sleep -Seconds 10;" ^
-  "} while ((Get-Date) -lt $deadline);" ^
-  "if (-not $seen) { Write-Host 'No tag workflow run was found; continuing.'; exit 0 }" ^
-  "throw 'Timed out waiting for the tag workflow to finish.';"
+timeout /t 20 /nobreak >nul
+:wait_tag_actions
+"%GH%" run list --repo "%REPO%" --branch "%TAG%" --limit 10 --json status -q ".[] | select(.status != \"completed\") | .status" > "%PUBLISH_TMP%\active-runs.txt"
 if errorlevel 1 exit /b 1
+for %%A in ("%PUBLISH_TMP%\active-runs.txt") do if %%~zA GTR 0 (
+  timeout /t 10 /nobreak >nul
+  goto wait_tag_actions
+)
 
 echo.
 echo Creating or updating GitHub release...
