@@ -149,6 +149,24 @@ if errorlevel 1 exit /b 1
 popd
 
 echo.
+echo Waiting for GitHub Actions tag build to finish before uploading assets...
+set "GH_EXE=%GH%"
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ErrorActionPreference='Stop';" ^
+  "$gh=$env:GH_EXE; $repo=$env:REPO; $tag=$env:TAG;" ^
+  "$deadline=(Get-Date).AddMinutes(20); $seen=$false;" ^
+  "do {" ^
+  "  $runs=@(& $gh run list --repo $repo --branch $tag --limit 10 --json databaseId,status,conclusion | ConvertFrom-Json);" ^
+  "  if ($runs.Count -gt 0) { $seen=$true }" ^
+  "  $active=@($runs | Where-Object { $_.status -ne 'completed' });" ^
+  "  if ($seen -and $active.Count -eq 0) { exit 0 }" ^
+  "  Start-Sleep -Seconds 10;" ^
+  "} while ((Get-Date) -lt $deadline);" ^
+  "if (-not $seen) { Write-Host 'No tag workflow run was found; continuing.'; exit 0 }" ^
+  "throw 'Timed out waiting for the tag workflow to finish.';"
+if errorlevel 1 exit /b 1
+
+echo.
 echo Creating or updating GitHub release...
 "%GH%" release view "%TAG%" --repo "%REPO%" >nul 2>nul
 if errorlevel 1 (

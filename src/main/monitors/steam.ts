@@ -53,6 +53,11 @@ function parseAcf(content: string): AcfData {
   return result as AcfData
 }
 
+function parseByteCount(value?: string): number {
+  const parsed = Number(value ?? 0)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
+}
+
 function parseLibraryFolders(vdfPath: string): string[] {
   const paths: string[] = []
   try {
@@ -145,12 +150,18 @@ async function processManifest(libPath: string, manifest: string): Promise<Downl
   const appId = acf.appid ?? manifest.replace('appmanifest_', '').replace('.acf', '')
   const installDir = acf.installdir?.trim() || ''
   const stateFlags = Number(acf.StateFlags ?? 0)
+  const bytesToDownload = parseByteCount(acf.BytesToDownload)
+  const bytesDownloaded = parseByteCount(acf.BytesDownloaded)
+  const bytesToStage = parseByteCount(acf.BytesToStage)
+  const bytesStaged = parseByteCount(acf.BytesStaged)
 
   // Decide based on update/download state bits, not the "fully installed" bit
   // (4). Bit 4 stays set while an already-installed game is patching.
   const isPaused = (stateFlags & STATE_UPDATE_PAUSED) !== 0
   const isTransferring = (stateFlags & STATE_TRANSFER_MASK) !== 0
   const isUpdateFlagged = (stateFlags & STATE_UPDATE_ACTIVE_MASK) !== 0
+  const hasDownloadProgress = bytesToDownload > 0 && bytesDownloaded < bytesToDownload
+  const hasStageProgress = bytesToStage > 0 && bytesStaged < bytesToStage
 
   // Surface the task if it is transferring, paused, or otherwise flagged as an
   // in-progress update. A game that is merely fully installed has none of these.
@@ -164,17 +175,28 @@ async function processManifest(libPath: string, manifest: string): Promise<Downl
   const recentlyActive = latestMtimeMs > 0 && Date.now() - latestMtimeMs <= ACTIVE_GRACE_MS
 
   // The paused bit always wins. Otherwise, trust Steam's transfer bits and the
-  // manifest timestamp. Do not scan steamapps/downloading or common/<game>:
-  // repeatedly touching Steam's active file tree on Windows can contribute to
-  // "Disk error" failures while Steam preallocates, stages, renames, or commits.
-  const reallyDownloading = !isPaused && (isTransferring || recentlyActive)
-  const state: DownloadState = reallyDownloading ? 'downloading' : 'paused'
+  // manifest's byte counters. Some Steam downloads report StateFlags=1026
+  // (UpdateStarted + UpdateRequired) while the UI is actively downloading, so
+  // byte progress is a safer signal than waiting for the Downloading bit alone.
+  // Do not scan steamapps/downloading or common/<game>: repeatedly touching
+  // Steam's active file tree on Windows can contribute to "Disk error" failures.
+  let state: DownloadState = 'paused'
+  if (!isPaused) {
+    if (hasDownloadProgress || isTransferring || (isUpdateFlagged && recentlyActive)) {
+      state = 'downloading'
+    } else if (hasStageProgress) {
+      state = 'installing'
+    }
+  }
+
+  const totalBytes = bytesToDownload > 0 ? bytesToDownload : bytesToStage
+  const downloadedBytes = bytesToDownload > 0 ? Math.min(bytesDownloaded, bytesToDownload) : Math.min(bytesStaged, bytesToStage)
 
   return {
     id: `steam_${appId}`,
     name: acf.name ?? `App ${appId}`,
-    totalBytes: -1,
-    downloadedBytes: 0,
+    totalBytes: totalBytes > 0 ? totalBytes : -1,
+    downloadedBytes,
     speedBps: 0,
     eta: -1,
     state,
