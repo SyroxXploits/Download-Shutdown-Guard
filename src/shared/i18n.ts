@@ -352,7 +352,7 @@ const en: Translations = {
       transmission: 'Connects to Transmission RPC endpoint',
       browser: 'Watches Downloads folder for .crdownload, .part files',
       generic: 'Generic file-system download folder monitor',
-      installer: 'Detects running installers, Windows Update, and package managers'
+      installer: 'Detects installers, Windows Update, package managers, and active EA/Ubisoft/Xbox/Microsoft Store installs'
     },
 
     qbtUrl: 'Web API URL',
@@ -589,7 +589,7 @@ const fr: Translations = {
       transmission: 'Connexion au point de terminaison RPC de Transmission',
       browser: 'Surveille le dossier Téléchargements pour les fichiers .crdownload, .part',
       generic: 'Surveillance générique du dossier de téléchargement',
-      installer: 'Détecte les installateurs, Windows Update et les gestionnaires de paquets'
+      installer: 'Détecte les installateurs, Windows Update, les gestionnaires de paquets et les installations EA/Ubisoft/Xbox/Microsoft Store actives'
     },
 
     qbtUrl: 'URL de l\'API Web',

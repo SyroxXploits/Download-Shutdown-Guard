@@ -55,21 +55,10 @@ const PACKAGE_MANAGER_PROCESSES = [
   'yarn.exe'
 ]
 
-// Game platform updaters / launchers that install/patch
-const GAME_UPDATER_PROCESSES = [
-  'EpicGamesLauncher.exe', // Epic Games
-  'GalaxyClient.exe',      // GOG Galaxy
-  'origin.exe',            // EA Origin / EA App
-  'EADesktop.exe',
-  'Battle.net.exe',        // Battle.net / Blizzard
-  'UbisoftGameLauncher.exe' // Ubisoft Connect
-]
-
 const ALL_WATCHED_PROCESSES = [
   ...INSTALLER_PROCESSES,
   ...WINDOWS_UPDATE_PROCESSES,
-  ...PACKAGE_MANAGER_PROCESSES,
-  ...GAME_UPDATER_PROCESSES
+  ...PACKAGE_MANAGER_PROCESSES
 ]
 
 // ─── Tasklist runner ──────────────────────────────────────────────────────────
@@ -78,6 +67,158 @@ interface RunningProcess {
   name: string
   pid: number
   category: string
+}
+
+interface ProcessSnapshot {
+  names: Set<string>
+  commandLines: string[]
+}
+
+interface LauncherProbe {
+  id: string
+  name: string
+  processNames: string[]
+  commandLinePatterns?: RegExp[]
+  activityPaths: string[]
+}
+
+const ACTIVE_FILE_WINDOW_MS = 120_000
+
+const LAUNCHER_PROBES: LauncherProbe[] = [
+  {
+    id: 'ea',
+    name: 'EA App',
+    processNames: ['EADesktop.exe', 'EABackgroundService.exe', 'EALocalHostSvc.exe', 'origin.exe'],
+    commandLinePatterns: [/EADesktop/i, /Electronic Arts/i],
+    activityPaths: [
+      '%ProgramData%\\EA Desktop\\*',
+      '%ProgramData%\\Electronic Arts\\EA Desktop\\*',
+      '%LOCALAPPDATA%\\Electronic Arts\\EA Desktop\\*',
+      '%LOCALAPPDATA%\\EADesktop\\*',
+      '%APPDATA%\\EA Desktop\\*'
+    ]
+  },
+  {
+    id: 'ubisoft',
+    name: 'Ubisoft Connect',
+    processNames: ['upc.exe', 'UbisoftConnect.exe', 'UbisoftGameLauncher.exe', 'UbisoftGameLauncher64.exe'],
+    commandLinePatterns: [/Ubisoft/i, /Uplay/i],
+    activityPaths: [
+      '%ProgramFiles(x86)%\\Ubisoft\\Ubisoft Game Launcher\\cache\\*',
+      '%ProgramFiles%\\Ubisoft\\Ubisoft Game Launcher\\cache\\*',
+      '%LOCALAPPDATA%\\Ubisoft Game Launcher\\cache\\*',
+      '%ProgramData%\\Ubisoft\\*'
+    ]
+  },
+  {
+    id: 'xbox',
+    name: 'Xbox App',
+    processNames: ['XboxPcApp.exe', 'GamingServices.exe', 'GamingServicesNet.exe'],
+    commandLinePatterns: [/XboxPcApp/i, /GamingServices/i],
+    activityPaths: [
+      '%LOCALAPPDATA%\\Packages\\Microsoft.GamingApp_*\\LocalCache\\*',
+      '%LOCALAPPDATA%\\Packages\\Microsoft.XboxApp_*\\LocalCache\\*',
+      '%ProgramData%\\Microsoft\\Windows\\DeliveryOptimization\\Cache\\*'
+    ]
+  },
+  {
+    id: 'microsoft-store',
+    name: 'Microsoft Store',
+    processNames: ['WinStore.App.exe', 'StoreExperienceHost.exe', 'Microsoft.StorePurchaseApp.exe'],
+    commandLinePatterns: [/WindowsApps\\Microsoft\.WindowsStore/i, /StoreExperienceHost/i],
+    activityPaths: [
+      '%LOCALAPPDATA%\\Packages\\Microsoft.WindowsStore_*\\LocalCache\\*',
+      '%LOCALAPPDATA%\\Packages\\Microsoft.StorePurchaseApp_*\\LocalCache\\*',
+      '%ProgramData%\\Microsoft\\Windows\\DeliveryOptimization\\Cache\\*'
+    ]
+  }
+]
+
+function expandPathPattern(pattern: string): string[] {
+  const expanded = pattern.replace(/%([^%]+)%/g, (_, key: string) => process.env[key] ?? '')
+  if (!expanded || expanded.includes('%')) return []
+
+  const wildcardIndex = expanded.indexOf('*')
+  if (wildcardIndex === -1) return [expanded]
+
+  const parent = expanded.slice(0, wildcardIndex)
+  const lastSeparator = Math.max(parent.lastIndexOf('\\'), parent.lastIndexOf('/'))
+  const baseDir = lastSeparator >= 0 ? parent.slice(0, lastSeparator) : parent
+  if (!baseDir || !fs.existsSync(baseDir)) return []
+
+  try {
+    const escaped = expanded
+      .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+      .replace(/\*/g, '.*')
+    const re = new RegExp(`^${escaped}$`, 'i')
+    return fs.readdirSync(baseDir)
+      .map(entry => path.join(baseDir, entry))
+      .filter(fullPath => re.test(fullPath))
+  } catch {
+    return []
+  }
+}
+
+function hasRecentFileActivity(rootPath: string, cutoff: number, maxDepth = 2): boolean {
+  try {
+    const stat = fs.statSync(rootPath)
+    if (stat.mtimeMs > cutoff) return true
+    if (!stat.isDirectory()) return false
+  } catch {
+    return false
+  }
+
+  const stack: Array<{ dir: string; depth: number }> = [{ dir: rootPath, depth: 0 }]
+  while (stack.length > 0) {
+    const { dir, depth } = stack.pop()!
+    if (depth > maxDepth) continue
+
+    let entries: fs.Dirent[]
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true })
+    } catch {
+      continue
+    }
+
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name)
+      try {
+        const stat = fs.statSync(fullPath)
+        if (stat.mtimeMs > cutoff) return true
+        if (entry.isDirectory() && depth < maxDepth) {
+          stack.push({ dir: fullPath, depth: depth + 1 })
+        }
+      } catch {
+        // Launcher caches can churn while we look; ignore transient misses.
+      }
+    }
+  }
+
+  return false
+}
+
+function getProcessSnapshot(): ProcessSnapshot {
+  try {
+    const script = [
+      'Get-CimInstance Win32_Process |',
+      'Select-Object Name,CommandLine |',
+      'ConvertTo-Json -Compress'
+    ].join(' ')
+    const output = execSync(`powershell -NoProfile -Command "${script}"`, {
+      encoding: 'utf8',
+      timeout: 5000
+    }).trim()
+    if (!output) return { names: new Set(), commandLines: [] }
+
+    const parsed = JSON.parse(output) as Array<{ Name?: string; CommandLine?: string }> | { Name?: string; CommandLine?: string }
+    const rows = Array.isArray(parsed) ? parsed : [parsed]
+    return {
+      names: new Set(rows.map(row => row.Name?.toLowerCase()).filter(Boolean) as string[]),
+      commandLines: rows.map(row => row.CommandLine ?? '').filter(Boolean)
+    }
+  } catch {
+    return { names: new Set(), commandLines: [] }
+  }
 }
 
 function getRunningInstallers(): RunningProcess[] {
@@ -125,8 +266,38 @@ function categorize(processName: string): string {
   const name = processName.toLowerCase()
   if (WINDOWS_UPDATE_PROCESSES.some(p => p.toLowerCase() === name)) return 'Windows Update'
   if (PACKAGE_MANAGER_PROCESSES.some(p => p.toLowerCase() === name)) return 'Package Manager'
-  if (GAME_UPDATER_PROCESSES.some(p => p.toLowerCase() === name)) return 'Game Launcher'
   return 'Installer'
+}
+
+function detectLauncherActivity(snapshot: ProcessSnapshot): DownloadItem[] {
+  const cutoff = Date.now() - ACTIVE_FILE_WINDOW_MS
+  const items: DownloadItem[] = []
+
+  for (const probe of LAUNCHER_PROBES) {
+    const processRunning = probe.processNames.some(name => snapshot.names.has(name.toLowerCase())) ||
+      (probe.commandLinePatterns ?? []).some(pattern => snapshot.commandLines.some(commandLine => pattern.test(commandLine)))
+
+    if (!processRunning) continue
+
+    const hasActivity = probe.activityPaths
+      .flatMap(expandPathPattern)
+      .some(candidate => hasRecentFileActivity(candidate, cutoff))
+
+    if (!hasActivity) continue
+
+    items.push({
+      id: `launcher_${probe.id}`,
+      name: probe.name,
+      totalBytes: -1,
+      downloadedBytes: 0,
+      speedBps: 0,
+      eta: -1,
+      state: 'installing',
+      source: 'installer'
+    })
+  }
+
+  return items
 }
 
 // ─── Windows Update service state ────────────────────────────────────────────
@@ -183,6 +354,7 @@ export async function checkInstallers(): Promise<MonitorStatus> {
 
   try {
     const running = getRunningInstallers()
+    const processSnapshot = getProcessSnapshot()
     const wuServiceActive = isWindowsUpdateServiceActive()
     const wuHasPending = hasPendingWindowsUpdates()
 
@@ -215,6 +387,8 @@ export async function checkInstallers(): Promise<MonitorStatus> {
         source: 'installer'
       })
     }
+
+    items.push(...detectLauncherActivity(processSnapshot))
 
     const state: DownloadState = items.length > 0 ? 'installing' : 'idle'
 
