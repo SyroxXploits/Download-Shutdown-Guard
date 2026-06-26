@@ -82,7 +82,14 @@ interface LauncherProbe {
   activityPaths: string[]
 }
 
-const ACTIVE_FILE_WINDOW_MS = 120_000
+interface LauncherActivitySnapshot {
+  bytes: number
+  timestamp: number
+}
+
+const launcherActivitySnapshots = new Map<string, LauncherActivitySnapshot>()
+const LAUNCHER_MIN_GROWTH_BYTES = 1024 * 1024
+const LAUNCHER_MIN_SPEED_BPS = 128 * 1024
 
 const LAUNCHER_PROBES: LauncherProbe[] = [
   {
@@ -137,39 +144,56 @@ const LAUNCHER_PROBES: LauncherProbe[] = [
 function expandPathPattern(pattern: string): string[] {
   const expanded = pattern.replace(/%([^%]+)%/g, (_, key: string) => process.env[key] ?? '')
   if (!expanded || expanded.includes('%')) return []
+  if (!expanded.includes('*')) return [expanded]
 
-  const wildcardIndex = expanded.indexOf('*')
-  if (wildcardIndex === -1) return [expanded]
+  const parsed = path.parse(path.normalize(expanded))
+  const segments = expanded.slice(parsed.root.length).split(/[\\/]+/).filter(Boolean)
+  let candidates = [parsed.root]
 
-  const parent = expanded.slice(0, wildcardIndex)
-  const lastSeparator = Math.max(parent.lastIndexOf('\\'), parent.lastIndexOf('/'))
-  const baseDir = lastSeparator >= 0 ? parent.slice(0, lastSeparator) : parent
-  if (!baseDir || !fs.existsSync(baseDir)) return []
+  for (const segment of segments) {
+    const hasWildcard = segment.includes('*')
+    const next: string[] = []
 
-  try {
-    const escaped = expanded
-      .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-      .replace(/\*/g, '.*')
-    const re = new RegExp(`^${escaped}$`, 'i')
-    return fs.readdirSync(baseDir)
-      .map(entry => path.join(baseDir, entry))
-      .filter(fullPath => re.test(fullPath))
-  } catch {
-    return []
+    for (const candidate of candidates) {
+      if (!hasWildcard) {
+        next.push(path.join(candidate, segment))
+        continue
+      }
+
+      if (!fs.existsSync(candidate)) continue
+
+      try {
+        const re = new RegExp(`^${segment.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`, 'i')
+        for (const entry of fs.readdirSync(candidate)) {
+          if (re.test(entry)) next.push(path.join(candidate, entry))
+        }
+      } catch {
+        // Ignore unreadable launcher folders.
+      }
+    }
+
+    candidates = next
+    if (candidates.length === 0) break
   }
+
+  return candidates
 }
 
-function hasRecentFileActivity(rootPath: string, cutoff: number, maxDepth = 2): boolean {
+function getFolderByteTotal(rootPath: string, maxDepth = 3): number {
+  let totalBytes = 0
+  let visited = 0
+  const maxVisited = 2000
+
   try {
     const stat = fs.statSync(rootPath)
-    if (stat.mtimeMs > cutoff) return true
-    if (!stat.isDirectory()) return false
+    if (stat.isFile()) return stat.size
+    if (!stat.isDirectory()) return 0
   } catch {
-    return false
+    return 0
   }
 
   const stack: Array<{ dir: string; depth: number }> = [{ dir: rootPath, depth: 0 }]
-  while (stack.length > 0) {
+  while (stack.length > 0 && visited < maxVisited) {
     const { dir, depth } = stack.pop()!
     if (depth > maxDepth) continue
 
@@ -181,10 +205,11 @@ function hasRecentFileActivity(rootPath: string, cutoff: number, maxDepth = 2): 
     }
 
     for (const entry of entries) {
+      if (++visited >= maxVisited) break
       const fullPath = path.join(dir, entry.name)
       try {
         const stat = fs.statSync(fullPath)
-        if (stat.mtimeMs > cutoff) return true
+        if (stat.isFile()) totalBytes += stat.size
         if (entry.isDirectory() && depth < maxDepth) {
           stack.push({ dir: fullPath, depth: depth + 1 })
         }
@@ -194,7 +219,7 @@ function hasRecentFileActivity(rootPath: string, cutoff: number, maxDepth = 2): 
     }
   }
 
-  return false
+  return totalBytes
 }
 
 function getProcessSnapshot(): ProcessSnapshot {
@@ -270,31 +295,46 @@ function categorize(processName: string): string {
 }
 
 function detectLauncherActivity(snapshot: ProcessSnapshot): DownloadItem[] {
-  const cutoff = Date.now() - ACTIVE_FILE_WINDOW_MS
+  const now = Date.now()
   const items: DownloadItem[] = []
+  const runningLauncherIds = new Set<string>()
 
   for (const probe of LAUNCHER_PROBES) {
     const processRunning = probe.processNames.some(name => snapshot.names.has(name.toLowerCase())) ||
       (probe.commandLinePatterns ?? []).some(pattern => snapshot.commandLines.some(commandLine => pattern.test(commandLine)))
 
     if (!processRunning) continue
+    runningLauncherIds.add(probe.id)
 
-    const hasActivity = probe.activityPaths
+    const bytes = probe.activityPaths
       .flatMap(expandPathPattern)
-      .some(candidate => hasRecentFileActivity(candidate, cutoff))
+      .reduce((total, candidate) => total + getFolderByteTotal(candidate), 0)
 
-    if (!hasActivity) continue
+    const previous = launcherActivitySnapshots.get(probe.id)
+    launcherActivitySnapshots.set(probe.id, { bytes, timestamp: now })
+
+    if (!previous) continue
+
+    const elapsedSeconds = Math.max(1, (now - previous.timestamp) / 1000)
+    const growthBytes = bytes - previous.bytes
+    const speedBps = growthBytes > 0 ? growthBytes / elapsedSeconds : 0
+
+    if (growthBytes < LAUNCHER_MIN_GROWTH_BYTES || speedBps < LAUNCHER_MIN_SPEED_BPS) continue
 
     items.push({
       id: `launcher_${probe.id}`,
       name: probe.name,
       totalBytes: -1,
-      downloadedBytes: 0,
-      speedBps: 0,
+      downloadedBytes: Math.max(0, bytes),
+      speedBps,
       eta: -1,
-      state: 'installing',
+      state: 'downloading',
       source: 'installer'
     })
+  }
+
+  for (const id of launcherActivitySnapshots.keys()) {
+    if (!runningLauncherIds.has(id)) launcherActivitySnapshots.delete(id)
   }
 
   return items
