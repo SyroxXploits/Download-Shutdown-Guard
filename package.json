@@ -1,6 +1,6 @@
 {
   "name": "download-shutdown-guard",
-  "version": "1.0.17",
+  "version": "1.0.18",
   "description": "Automatically shut down your PC when all downloads finish",
   "main": "./out/main/index.js",
   "homepage": ".",
